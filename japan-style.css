@@ -274,6 +274,17 @@ input, textarea, select {
     overflow: hidden;
 }
 
+.hero::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, rgba(255, 107, 107, 0.3) 0%, rgba(255, 142, 83, 0.3) 50%, rgba(255, 193, 7, 0.3) 100%);
+    z-index: 2;
+}
+
 .hero-background {
     position: absolute;
     top: 0;
@@ -281,6 +292,12 @@ input, textarea, select {
     width: 100%;
     height: 100%;
     z-index: 1;
+    background-image: url('https://media.istockphoto.com/id/1213940713/video/japan-topographic-map-elevation-relief.jpg?s=640x640&k=20&c=pKRKWYUFTZu_Q2MOTGxlXnVDrGcD4HCl5kDTIU7jkig=');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    opacity: 0.3;
 }
 
 .sakura-petals {
@@ -338,7 +355,7 @@ input, textarea, select {
 
 .hero-content {
     position: relative;
-    z-index: 2;
+    z-index: 3;
     text-align: center;
     color: white;
     max-width: 800px;

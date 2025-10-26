@@ -819,9 +819,21 @@ document.addEventListener('DOMContentLoaded', function() {
 // Global weather constants
 const WEATHER_CACHE_KEY = 'japan_weather_cache';
 const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes in milliseconds
-const GOOGLE_WEATHER_API = 'https://api.weatherapi.com/v1'; // Using WeatherAPI (free alternative to Google)
+
+// Use config if available, otherwise fallback to direct constants
+const WEATHER_API_KEY = (typeof WEATHER_CONFIG !== 'undefined' && WEATHER_CONFIG.API_KEY !== 'YOUR_API_KEY_HERE') 
+    ? WEATHER_CONFIG.API_KEY 
+    : 'YOUR_OPENWEATHERMAP_API_KEY_HERE'; // Replace with your OpenWeatherMap API key
+
+const WEATHER_BASE_URL = (typeof WEATHER_CONFIG !== 'undefined') 
+    ? WEATHER_CONFIG.BASE_URL 
+    : 'https://api.openweathermap.org/data/2.5';
 
 function initWeatherSystem() {
+    console.log('🌤️ Initializing Weather System...');
+    console.log('Weather API Key configured:', WEATHER_API_KEY ? 'YES ✅' : 'NO ❌');
+    console.log('Weather Base URL:', WEATHER_BASE_URL);
+    
     // Location data for each destination
     const locations = {
         'Tokyo': { 
@@ -844,20 +856,35 @@ function initWeatherSystem() {
         }
     };
     
-    // Initialize weather for activity periods only
-    const weatherElements = document.querySelectorAll('.activity-weather');
-    weatherElements.forEach(element => {
-        const date = element.dataset.date;
-        const location = element.dataset.location;
-        const timeRange = element.dataset.timeRange;
-        
-        if (date && location && timeRange && locations[location]) {
-            // Load hourly weather for time range
-            loadHourlyWeatherData(element, locations[location], date, timeRange);
-        }
-    });
+    console.log('📍 Weather locations:', locations);
     
-    // Set up auto-refresh every 10 minutes
+        // Initialize weather for activity periods only
+        const weatherElements = document.querySelectorAll('.activity-weather');
+        console.log(`🎯 Found ${weatherElements.length} weather elements to load`);
+        
+        weatherElements.forEach((element, index) => {
+            const date = element.dataset.date;
+            const location = element.dataset.location;
+            const timeRange = element.dataset.timeRange;
+            
+            console.log(`📊 Loading weather #${index + 1}:`, {
+                location: location,
+                date: date,
+                timeRange: timeRange
+            });
+            
+            if (date && location && timeRange && locations[location]) {
+                // Load hourly weather for time range
+                loadHourlyWeatherData(element, locations[location], date, timeRange);
+            } else {
+                console.warn(`⚠️ Invalid weather data for element #${index + 1}:`, {
+                    date,
+                    location,
+                    timeRange,
+                    hasLocationData: !!locations[location]
+                });
+            }
+        });    // Set up auto-refresh every 10 minutes
     setInterval(() => {
         weatherElements.forEach(element => {
             const date = element.dataset.date;
@@ -907,36 +934,126 @@ async function loadHourlyWeatherData(element, location, date, timeRange, forceRe
 }
 
 async function fetchHourlyWeatherData(location, date, timeRange) {
-    // Parse time range (e.g., "09:30-11:00" or "14:30-18:30")
-    const [startTime, endTime] = timeRange.split('-');
-    const hours = generateHourRange(startTime, endTime);
+    console.log(`\n📊 FETCHING HOURLY WEATHER DATA`);
+    console.log(`📍 Location: ${location.name}`);
+    console.log(`📅 Date: ${date}, Time Range: ${timeRange}`);
     
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 400));
-    
-    const hourlyForecasts = [];
-    
-    for (const hour of hours) {
-        const hourStr = `${hour.toString().padStart(2, '0')}:00`;
-        const weatherData = generateRealisticWeatherData(location, date, hourStr);
+    try {
+        // Check if API key is configured
+        if (!WEATHER_API_KEY || WEATHER_API_KEY === 'YOUR_OPENWEATHERMAP_API_KEY_HERE') {
+            console.warn('⚠️ Weather API key not configured, using fallback data');
+            throw new Error('API key not configured');
+        }
+
+        // Use OpenWeatherMap 5-day forecast API for hourly data
+        const url = `${WEATHER_BASE_URL}/forecast?lat=${location.lat}&lon=${location.lon}&appid=${WEATHER_API_KEY}&units=metric&lang=en`;
         
-        hourlyForecasts.push({
-            time: hourStr,
-            temp: weatherData.temperature,
-            description: weatherData.condition,
-            humidity: weatherData.humidity,
-            windSpeed: weatherData.windSpeed,
-            icon: weatherData.iconCode
+        console.log(`🔗 Forecast API URL: ${url.replace(WEATHER_API_KEY, 'API_KEY_HIDDEN')}`);
+        console.log(`⏳ Making forecast API request...`);
+        
+        const response = await fetch(url);
+        
+        console.log(`📡 Forecast API Response Status: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+            throw new Error(`Weather API error: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        console.log(`✅ RAW FORECAST DATA RECEIVED:`, {
+            city: data.city.name,
+            totalForecasts: data.list.length,
+            firstForecast: data.list[0],
+            timezone: data.city.timezone
         });
+        
+        // Parse time range to get relevant hours
+        const [startTime, endTime] = timeRange.split('-');
+        const hours = generateHourRange(startTime, endTime);
+        
+        console.log(`⏰ Time range parsed:`, {
+            startTime,
+            endTime,
+            hoursToFind: hours
+        });
+        
+        const hourlyForecasts = [];
+        
+        // Get current weather for immediate forecast
+        for (const hour of hours) {
+            const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+            
+            // Find the closest forecast entry or use current weather
+            const forecast = data.list.find(item => {
+                const forecastHour = new Date(item.dt * 1000).getHours();
+                return Math.abs(forecastHour - hour) <= 1; // Within 1 hour
+            }) || data.list[0]; // fallback to first available forecast
+            
+            const hourlyData = {
+                time: hourStr,
+                temp: Math.round(forecast.main.temp),
+                description: forecast.weather[0].description,
+                humidity: forecast.main.humidity,
+                windSpeed: Math.round(forecast.wind.speed * 3.6), // Convert m/s to km/h
+                icon: mapOpenWeatherIcon(forecast.weather[0].icon)
+            };
+            
+            hourlyForecasts.push(hourlyData);
+            
+            console.log(`🕐 Hour ${hourStr}:`, hourlyData);
+        }
+        
+        const result = {
+            location: location.name,
+            date: date,
+            timeRange: timeRange,
+            hourlyForecasts: hourlyForecasts,
+            source: 'OpenWeatherMap API (Real Data)'
+        };
+        
+        console.log(`✨ HOURLY FORECAST RESULT:`, result);
+        console.log(`🎯 This is REAL hourly weather data from OpenWeatherMap API!\n`);
+        
+        return result;
+        
+    } catch (error) {
+        console.error(`❌ Hourly weather API failed:`, error.message);
+        console.log(`🔄 Switching to fallback simulated hourly data...`);
+        
+        // Fallback to simulated data
+        const [startTime, endTime] = timeRange.split('-');
+        const hours = generateHourRange(startTime, endTime);
+        
+        const hourlyForecasts = [];
+        
+        for (const hour of hours) {
+            const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+            const weatherData = generateRealisticWeatherData(location, date, hourStr);
+            
+            hourlyForecasts.push({
+                time: hourStr,
+                temp: weatherData.temperature,
+                description: weatherData.condition,
+                humidity: weatherData.humidity,
+                windSpeed: weatherData.windSpeed,
+                icon: weatherData.iconCode
+            });
+        }
+        
+        const fallbackResult = {
+            location: location.name,
+            date: date,
+            timeRange: timeRange,
+            hourlyForecasts: hourlyForecasts,
+            source: 'Fallback Data (Simulated)'
+        };
+        
+        console.log(`🎭 FALLBACK HOURLY DATA:`, fallbackResult);
+        console.log(`⚠️ This is simulated hourly weather data, not real API data!\n`);
+        
+        return fallbackResult;
     }
-    
-    return {
-        location: location.name,
-        date: date,
-        timeRange: timeRange,
-        hourlyForecasts: hourlyForecasts,
-        source: 'Google Weather API'
-    };
 }
 
 function generateHourRange(startTime, endTime) {
@@ -1027,26 +1144,111 @@ async function loadWeatherData(element, location, date, time = '12:00', forceRef
 }
 
 async function fetchGoogleStyleWeatherData(location, date, time = '12:00') {
-    // Using browser's built-in weather data simulation
-    // This simulates Google's weather API response format with time-specific data
+    console.log(`\n🌡️ FETCHING WEATHER DATA`);
+    console.log(`📍 Location: ${location.name} (${location.lat}, ${location.lon})`);
+    console.log(`📅 Date: ${date}, Time: ${time}`);
     
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    // Generate realistic weather data based on location, date, and time
-    const weatherData = generateRealisticWeatherData(location, date, time);
-    
-    return {
-        temp: weatherData.temperature,
-        description: weatherData.condition,
-        humidity: weatherData.humidity,
-        windSpeed: weatherData.windSpeed,
-        icon: weatherData.iconCode,
-        location: location.name,
-        date: date,
-        time: time,
-        source: 'Google Weather API'
+    try {
+        // Check if API key is configured
+        if (!WEATHER_API_KEY || WEATHER_API_KEY === 'YOUR_OPENWEATHERMAP_API_KEY_HERE') {
+            console.warn('⚠️ Weather API key not configured, using fallback data');
+            throw new Error('API key not configured');
+        }
+
+        // Use OpenWeatherMap current weather API
+        const url = `${WEATHER_BASE_URL}/weather?lat=${location.lat}&lon=${location.lon}&appid=${WEATHER_API_KEY}&units=metric&lang=en`;
+        
+        console.log(`🔗 API URL: ${url.replace(WEATHER_API_KEY, 'API_KEY_HIDDEN')}`);
+        console.log(`⏳ Making API request...`);
+        
+        const response = await fetch(url);
+        
+        console.log(`📡 API Response Status: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+            throw new Error(`Weather API error: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        console.log(`✅ RAW API DATA RECEIVED:`, data);
+        console.log(`🌤️ Weather Summary:`, {
+            location: data.name,
+            temperature: `${Math.round(data.main.temp)}°C`,
+            condition: data.weather[0].description,
+            humidity: `${data.main.humidity}%`,
+            windSpeed: `${Math.round(data.wind.speed * 3.6)} km/h`,
+            icon: data.weather[0].icon
+        });
+        
+        // Convert OpenWeatherMap response to your format
+        const processedData = {
+            temp: Math.round(data.main.temp),
+            description: data.weather[0].description,
+            humidity: data.main.humidity,
+            windSpeed: Math.round(data.wind.speed * 3.6), // Convert m/s to km/h
+            icon: mapOpenWeatherIcon(data.weather[0].icon),
+            location: location.name,
+            date: date,
+            time: time,
+            source: 'OpenWeatherMap API (Real Data)'
+        };
+        
+        console.log(`🎯 PROCESSED DATA FOR DISPLAY:`, processedData);
+        console.log(`✨ This is REAL weather data from OpenWeatherMap API!\n`);
+        
+        return processedData;
+        
+    } catch (error) {
+        console.error(`❌ Real weather API failed:`, error.message);
+        console.log(`🔄 Switching to fallback simulated data...`);
+        
+        // Fallback to simulated data if API fails
+        const weatherData = generateRealisticWeatherData(location, date, time);
+        
+        const fallbackData = {
+            temp: weatherData.temperature,
+            description: weatherData.condition,
+            humidity: weatherData.humidity,
+            windSpeed: weatherData.windSpeed,
+            icon: weatherData.iconCode,
+            location: location.name,
+            date: date,
+            time: time,
+            source: 'Fallback Data (Simulated)'
+        };
+        
+        console.log(`🎭 FALLBACK DATA:`, fallbackData);
+        console.log(`⚠️ This is simulated weather data, not real API data!\n`);
+        
+        return fallbackData;
+    }
+}
+
+// Map OpenWeatherMap icons to your weather icon format
+function mapOpenWeatherIcon(owmIcon) {
+    const iconMap = {
+        '01d': '01d', // clear sky day
+        '01n': '01n', // clear sky night
+        '02d': '02d', // few clouds day
+        '02n': '02n', // few clouds night
+        '03d': '03d', // scattered clouds day
+        '03n': '03n', // scattered clouds night
+        '04d': '04d', // broken clouds day
+        '04n': '04n', // broken clouds night
+        '09d': '09d', // shower rain day
+        '09n': '09n', // shower rain night
+        '10d': '10d', // rain day
+        '10n': '10n', // rain night
+        '11d': '11d', // thunderstorm day
+        '11n': '11n', // thunderstorm night
+        '13d': '13d', // snow day
+        '13n': '13n', // snow night
+        '50d': '50d', // mist day
+        '50n': '50n'  // mist night
     };
+    
+    return iconMap[owmIcon] || '02d'; // default to partly cloudy day
 }
 
 function generateRealisticWeatherData(location, date, time = '12:00') {
@@ -1360,6 +1562,12 @@ function displayWeather(element, data) {
 }
 
 function displayHourlyWeather(element, data) {
+    console.log(`\n🖥️ DISPLAYING WEATHER ON PAGE`);
+    console.log(`📍 Location: ${data.location}`);
+    console.log(`📊 Data Source: ${data.source}`);
+    console.log(`📅 Date: ${data.date}, Time Range: ${data.timeRange}`);
+    console.log(`🕐 Hourly Forecasts:`, data.hourlyForecasts);
+    
     const loading = element.querySelector('.weather-loading');
     let display = element.querySelector('.weather-display');
     const error = element.querySelector('.weather-error');
@@ -1374,6 +1582,8 @@ function displayHourlyWeather(element, data) {
         display.className = 'weather-display';
         element.appendChild(display);
     }
+    
+    console.log(`🎨 Creating HTML for weather display...`);
     
     // Create hourly weather HTML
     const hourlyHTML = data.hourlyForecasts.map(forecast => {
@@ -1419,6 +1629,14 @@ function displayHourlyWeather(element, data) {
             }, index * 100);
         });
     }, 200);
+    
+    console.log(`✅ Weather display completed for ${data.location}`);
+    console.log(`🎯 Data shown on website is from: ${data.source}`);
+    if (data.source.includes('Real Data')) {
+        console.log(`🌟 SUCCESS: Real weather data is now visible on your website! 🌟\n`);
+    } else {
+        console.log(`⚠️ NOTE: Simulated data is shown (API may have failed)\n`);
+    }
 }
 
 function getVisibility(description) {
