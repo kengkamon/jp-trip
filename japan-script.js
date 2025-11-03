@@ -200,6 +200,11 @@ function initSakuraAnimation() {
     const sakuraContainer = document.querySelector('.sakura-petals');
     const petals = ['🌸', '🌺', '🏵️'];
     
+    if (!sakuraContainer) {
+        console.warn('[SakuraAnimation] Container not found, skipping petal animation.');
+        return;
+    }
+    
     function createSakuraPetal() {
         const petal = document.createElement('div');
         petal.innerHTML = petals[Math.floor(Math.random() * petals.length)];
